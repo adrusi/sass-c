@@ -4,8 +4,18 @@ set(CMAKE_C_FLAGS "-g -DENABLE_HOOKS -DENABLE_READ_BYTE_HOOK=1 -DENABLE_WRITE_BY
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "bin/")
 add_definitions("-Wall")
 
-add_executable(sass
-    main.c
+#add_executable(sass
+#    src/main.c
+#    src/lex.c
+#    src/tok.c
+#    src/strbuf.c
+#    src/strutil.c
+#)
+
+add_executable(test_tok
+  src/test_tok.c
+  src/strbuf.c
+  src/strutil.c
 )
 
 ADD_CUSTOM_TARGET(man ALL)
