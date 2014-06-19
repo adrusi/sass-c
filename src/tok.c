@@ -27,11 +27,11 @@ int tokread_eof(FILE *f, tok *t) {
 int tokread_sym(FILE *f, tok *t) {
   t->type = TOK_SYM;
   char c = fgetc(f);
-  if (!(c == '_' || alphabetic(c))) return 0;
+  if (!(c == '_' || c == '.' || alphabetic(c))) return 0;
   strbuf s = strbuf_new();
   strbuf_appendchar(&s, c);
   c = fgetc(f);
-  while (c == '_' || alphabetic(c) || numeric(c)) {
+  while (c == '_' || c == '.' || alphabetic(c) || numeric(c)) {
     strbuf_appendchar(&s, c);
     c = fgetc(f);
   }
@@ -357,6 +357,193 @@ static int read_bool(FILE *f, tok *t) {
     tok_free(*t);
     return 0;
   }
+}
+
+int tokread_brk(FILE *f, tok *t) {
+  t->type = TOK_BRK;
+  char c = fgetc(f);
+  return c == '\\' || c == '\n';
+}
+
+static int read_lbl_pre(FILE *f, tok *t);
+static int read_lbl_post(FILE *f, tok *t);
+
+#define NUM_LBL_READERS 2
+int tokread_lbl(FILE *f, tok *t) {
+  t->type = TOK_LBL;
+  static tok_reader readers[NUM_LBL_READERS] = {
+    read_lbl_pre, read_lbl_post
+  };
+  long mark = ftell(f);
+  int i;
+  for (i = 0; i < NUM_LBL_READERS; i++) {
+    if (readers[i](f, t)) return 1;
+    else fseek(f, mark, SEEK_SET);
+  }
+  return 0;
+}
+
+static int read_lbl_pre(FILE *f, tok *t) {
+  if (fgetc(f) != ':') return 0;
+  if (!tokread_sym(f, t)) {
+    t->type = TOK_LBL;
+    tok_free(*t);
+    return 0;
+  }
+  t->type = TOK_LBL;
+  return 1;
+}
+
+static int read_lbl_post(FILE *f, tok *t) {
+  if (!tokread_sym(f, t)) {
+    t->type = TOK_LBL;
+    tok_free(*t);
+    return 0;
+  }
+  if (fgetc(f) != ':') {
+    tok_free(*t);
+    return 0;
+  }
+  t->type = TOK_LBL;
+  return 1;
+}
+
+#define NUM_OPERATORS 17
+int tokread_opr(FILE *f, tok *t) {
+  t->type = TOK_OPR;
+  static struct { tokdat_opr id; char *str; } ops[NUM_OPERATORS] = {
+    {TOKOPR_ADD, "+"},  {TOKOPR_SUB, "-"},  {TOKOPR_MUL, "*"},
+    {TOKOPR_DIV, "/"},  {TOKOPR_MOD, "%"},  {TOKOPR_SHR, ">>"},
+    {TOKOPR_SHL, "<<"}, {TOKOPR_LTE, "<="}, {TOKOPR_GTE, ">="},
+    {TOKOPR_LT,  "<"},  {TOKOPR_GT,  ">"},  {TOKOPR_EQ,  "=="},
+    {TOKOPR_NEQ, "!="}, {TOKOPR_AND, "&&"}, {TOKOPR_OR,  "||"},
+    {TOKOPR_BND, "&"},  {TOKOPR_BOR, "|"}
+  };
+  long mark = ftell(f);
+  int i;
+  char buffer[3];
+  for (i = 0; i < NUM_OPERATORS; i++) {
+    int len = strlen(ops[i].str);
+    fgets(buffer, len + 1, f);
+    if (strcmp(buffer, ops[i].str) == 0) {
+      t->data.opr = ops[i].id;
+      return 1;
+    }
+    fseek(f, mark, SEEK_SET);
+  }
+  return 0;
+}
+
+int tokread_sep(FILE *f, tok *t) {
+  t->type = TOK_SEP;
+  return fgetc(f) == ',';
+}
+
+int tokread_str(FILE *f, tok *t) {
+  t->type = TOK_STR;
+  if (fgetc(f) != '"') return 0;
+  char c, _c;
+  strbuf s = strbuf_new();
+  while ((c = fgetc(f)) != '"') {
+    if (c != '\\') {
+      strbuf_appendchar(&s, c);
+      continue;
+    }
+    switch (c = fgetc(f)) {
+      case '"': case '\\':
+        strbuf_appendchar(&s, c);
+        break;
+      case 'a':
+        strbuf_appendchar(&s, '\a');
+        break;
+      case 'b':
+        strbuf_appendchar(&s, '\b');
+        break;
+      case 'f':
+        strbuf_appendchar(&s, '\f');
+        break;
+      case 'n':
+        strbuf_appendchar(&s, '\n');
+        break;
+      case 'r':
+        strbuf_appendchar(&s, '\r');
+        break;
+      case 't':
+        strbuf_appendchar(&s, '\t');
+        break;
+      case 'v':
+        strbuf_appendchar(&s, '\v');
+        break;
+      case '0': case '1': case '2': case '3':
+      case '4': case '5': case '6': case '7':
+        _c = '\0';
+        do {
+          _c *= 010;
+          _c += c - '0';
+        } while (is_octal_digit(c = fgetc(f)));
+        fseek(f, -1, SEEK_CUR);
+        strbuf_appendchar(&s, _c);
+        break;
+      case 'x':
+        _c = '\0';
+        while (is_hex_digit(c = fgetc(f))) {
+          _c *= 0x10;
+          if      (c >= '0' && c <= '9') _c += c - '0';
+          else if (c >= 'A' && c <= 'F') _c += c - 'A' + 0xA;
+          else                           _c += c - 'a' + 0xa;
+        }
+        fseek(f, -1, SEEK_CUR);
+        strbuf_appendchar(&s, _c);
+        break;
+      case 'u':
+        // TODO unicode escape codes
+        log_err("Unicode escape codes in strings not yet supported.");
+        break;
+      default:
+        strbuf_free(s);
+        return 0;
+    }
+  }
+  t->data.str = s.string;
+  return 1;
+}
+
+#define NUM_DIRECTIVES 17
+int tokread_dir(FILE *f, tok *t) {
+  t->type = TOK_DIR;
+  static struct { tokdat_dir id; char *str; } dirs[NUM_DIRECTIVES] = {
+    {TOKDIR_ASCII, "ascii"}, {TOKDIR_ASCIIZ, "asciiz"}, {TOKDIR_ASCIIP, "asciip"},
+    {TOKDIR_DB, "db"}, {TOKDIR_DW, "dw"}, {TOKDIR_DEFINE, "define"},
+    {TOKDIR_ECHO, "echo"}, {TOKDIR_ELSE, "else"}, {TOKDIR_ENDIF, "endif"},
+    {TOKDIR_EQU, "equ"}, {TOKDIR_FILL, "fill"}, {TOKDIR_IFDEF, "ifdef"},
+    {TOKDIR_IF, "if"}, {TOKDIR_INCLUDE, "include"}, {TOKDIR_LIST, "list"},
+    {TOKDIR_NOLIST, "nolist"}, {TOKDIR_ORG, "org"}
+  };
+  char c = fgetc(f);
+  if (c != '.' && c != '#') return 0;
+  char buffer[8];
+  long mark = ftell(f);
+  int i;
+  for (i = 0; i < NUM_DIRECTIVES; i++) {
+    int len = strlen(dirs[i].str);
+    fgets(buffer, len + 1, f);
+    if (strcmp(buffer, dirs[i].str) == 0) {
+      t->data.dir = dirs[i].id;
+      return 1;
+    }
+    fseek(f, mark, SEEK_SET);
+  }
+  return 0;
+}
+
+int tokread_beg(FILE *f, tok *t) {
+  t->type = TOK_BEG;
+  return fgetc(f) == '(';
+}
+
+int tokread_end(FILE *f, tok *t) {
+  t->type = TOK_END;
+  return fgetc(f) == ')';
 }
 
 void tok_free(tok t) {

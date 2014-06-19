@@ -204,9 +204,7 @@ test (tokread_num) {
   tok t;
   FILE *f;
   f = file_with_contents("0b111100000001");
-  debug("BELOW");
   assert(tokread_num(f, &t));
-  debug("ABOVE binary: %x", t.data.num);
   assert(t.data.num == 0xF01);
   assert(fgetc(f) == EOF);
   f = file_with_contents("%111100000010 abc");
@@ -259,6 +257,99 @@ test (tokread_num) {
   assert(!tokread_num(f, &t));
 }
 
+test (tokread_brk) {
+  FILE *f;
+  tok t;
+  f = file_with_contents("\n");
+  assert(tokread_brk(f, &t));
+  assert(fgetc(f) == EOF);
+  f = file_with_contents("\\ abc");
+  assert(tokread_brk(f, &t));
+  assert(fgetc(f) == ' ');
+}
+
+test (tokread_lbl) {
+  FILE *f;
+  tok t;
+  f = file_with_contents(":pre");
+  assert(tokread_lbl(f, &t));
+  assert(strcmp(t.data.lbl, "pre") == 0);
+  assert(fgetc(f) == EOF);
+  f = file_with_contents("post: abc");
+  assert(tokread_lbl(f, &t));
+  assert(strcmp(t.data.lbl, "post") == 0);
+  assert(fgetc(f) == ' ');
+}
+
+#define NUM_OPERATORS 17
+test (tokread_opr) {
+  FILE *f;
+  tok t;
+  f = file_with_contents("+");
+  assert(tokread_opr(f, &t));
+  assert(fgetc(f) == EOF);
+  f = file_with_contents("- abc");
+  assert(tokread_opr(f, &t));
+  assert(fgetc(f) == ' ');
+  static struct { tokdat_opr id; char *str; } ops[NUM_OPERATORS] = {
+    {TOKOPR_ADD, "+"},  {TOKOPR_SUB, "-"},  {TOKOPR_MUL, "*"},
+    {TOKOPR_DIV, "/"},  {TOKOPR_MOD, "%"},  {TOKOPR_SHR, ">>"},
+    {TOKOPR_SHL, "<<"}, {TOKOPR_LTE, "<="}, {TOKOPR_GTE, ">="},
+    {TOKOPR_LT,  "<"},  {TOKOPR_GT,  ">"},  {TOKOPR_EQ,  "=="},
+    {TOKOPR_NEQ, "!="}, {TOKOPR_AND, "&&"}, {TOKOPR_OR,  "||"},
+    {TOKOPR_BND, "&"},  {TOKOPR_BOR, "|"}
+  };
+  int i;
+  for (i = 0; i < NUM_OPERATORS; i++) {
+    f = file_with_contents(ops[i].str);
+    assert(tokread_opr(f, &t));
+    assert(t.data.opr == ops[i].id);
+  }
+}
+
+test (tokread_sep) {
+  FILE *f;
+  tok t;
+  f = file_with_contents(",");
+  assert(tokread_sep(f, &t));
+  assert(fgetc(f) == EOF);
+}
+
+test (tokread_str) {
+  FILE *f;
+  tok t;
+  f = file_with_contents("\"abc \\n \\\" \\\\ \\a \\033\"");
+  assert(tokread_str(f, &t));
+  assert(strcmp(t.data.str, "abc \n \" \\ \a \033") == 0);
+}
+
+test (tokread_dir) {
+  FILE *f;
+  tok t;
+  f = file_with_contents(".define");
+  assert(tokread_dir(f, &t));
+  assert(fgetc(f) == EOF);
+  f = file_with_contents(".org abc");
+  assert(tokread_dir(f, &t));
+  assert(fgetc(f) == ' ');
+}
+
+test (tokread_beg) {
+  FILE *f;
+  tok t;
+  f = file_with_contents("(");
+  assert(tokread_beg(f, &t));
+  assert(fgetc(f) == EOF);
+}
+
+test (tokread_end) {
+  FILE *f;
+  tok t;
+  f = file_with_contents(")");
+  assert(tokread_end(f, &t));
+  assert(fgetc(f) == EOF);
+}
+
 suite {
   test_case(tokread_eof);
   test_case(tokread_sym);
@@ -271,6 +362,14 @@ suite {
   test_case(read_char);
   test_case(read_bool);
   test_case(tokread_num);
+  test_case(tokread_brk);
+  test_case(tokread_lbl);
+  test_case(tokread_opr);
+  test_case(tokread_sep);
+  test_case(tokread_str);
+  test_case(tokread_dir);
+  test_case(tokread_beg);
+  test_case(tokread_end);
   return 0;
 }
   
