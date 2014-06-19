@@ -2,6 +2,7 @@
 #include "test.h"
 #include <stdio.h>
 #include <string.h>
+#include "dbg.h"
 
 static FILE *file_with_contents(char *str) {
   FILE *f = tmpfile();
@@ -150,21 +151,21 @@ test (read_bin) {
   assert(t.data.num == 0xF01);
   assert(fgetc(f) == EOF);
   f = file_with_contents("0b111100000001 abc");
-  assert(read_hex(f, &t));
+  assert(read_bin(f, &t));
   assert(fgetc(f) == ' ');
   f = file_with_contents("%111100000001");
   assert(read_bin(f, &t));
   assert(t.data.num == 0xF01);
   assert(fgetc(f) == EOF);
   f = file_with_contents("%111100000001 abc");
-  assert(read_hex(f, &t));
+  assert(read_bin(f, &t));
   assert(fgetc(f) == ' ');
   f = file_with_contents("111100000001b");
   assert(read_bin(f, &t));
   assert(t.data.num == 0xF01);
   assert(fgetc(f) == EOF);
   f = file_with_contents("111100000001b abc");
-  assert(read_hex(f, &t));
+  assert(read_bin(f, &t));
   assert(fgetc(f) == ' ');
 }
 
@@ -199,6 +200,65 @@ test (read_bool) {
   assert(fgetc(f) == ' ');
 }
 
+test (tokread_num) {
+  tok t;
+  FILE *f;
+  f = file_with_contents("0b111100000001");
+  debug("BELOW");
+  assert(tokread_num(f, &t));
+  debug("ABOVE binary: %x", t.data.num);
+  assert(t.data.num == 0xF01);
+  assert(fgetc(f) == EOF);
+  f = file_with_contents("%111100000010 abc");
+  assert(tokread_num(f, &t));
+  assert(t.data.num == 0xF02);
+  assert(fgetc(f) == ' ');
+  f = file_with_contents("111100000011b");
+  assert(tokread_num(f, &t));
+  assert(t.data.num == 0xF03);
+  f = file_with_contents("0xDEADbeef");
+  assert(tokread_num(f, &t));
+  assert(t.data.num == 0xDEADbeef);
+  assert(fgetc(f) == EOF);
+  f = file_with_contents("$123ABC abc");
+  assert(tokread_num(f, &t));
+  assert(t.data.num == 0x123ABC);
+  assert(fgetc(f) == ' ');
+  f = file_with_contents("9FADh");
+  assert(tokread_num(f, &t));
+  assert(t.data.num == 0x9FAD);
+  f = file_with_contents("0666");
+  assert(tokread_num(f, &t));
+  assert(t.data.num == 0666);
+  assert(fgetc(f) == EOF);
+  f = file_with_contents("755o abc");
+  assert(tokread_num(f, &t));
+  assert(t.data.num == 0755);
+  assert(fgetc(f) == ' ');
+  f = file_with_contents("'a'");
+  assert(tokread_num(f, &t));
+  assert(t.data.num == 'a');
+  assert(fgetc(f) == EOF);
+  f = file_with_contents("'\\'' abc");
+  assert(tokread_num(f, &t));
+  assert(t.data.num = '\'');
+  assert(fgetc(f) == ' ');
+  f = file_with_contents("true");
+  assert(tokread_num(f, &t));
+  assert(t.data.num == 1);
+  assert(fgetc(f) == EOF);
+  f = file_with_contents("false abc");
+  assert(tokread_num(f, &t));
+  assert(t.data.num == 0);
+  assert(fgetc(f) == ' ');
+  f = file_with_contents("abc");
+  assert(!tokread_num(f, &t));
+  f = file_with_contents("$");
+  assert(!tokread_num(f, &t));
+  f = file_with_contents("%");
+  assert(!tokread_num(f, &t));
+}
+
 suite {
   test_case(tokread_eof);
   test_case(tokread_sym);
@@ -210,6 +270,7 @@ suite {
   test_case(read_bin);
   test_case(read_char);
   test_case(read_bool);
+  test_case(tokread_num);
   return 0;
 }
   

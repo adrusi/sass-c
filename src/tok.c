@@ -152,19 +152,19 @@ static int read_hex_asm(FILE *f, tok *t) {
   char c;
   c = fgetc(f);
   if (c != '$') return 0;
-  while (is_hex_digit(c = fgetc(f))) {
+  if (!is_hex_digit(c = fgetc(f))) return 0;
+  do {
     t->data.num *= 0x10;
     if      (c >= '0' && c <= '9') t->data.num += c - '0';
     else if (c >= 'A' && c <= 'F') t->data.num += c - 'A' + 0xA;
     else                           t->data.num += c - 'a' + 0xa;
-  }
+  } while (is_hex_digit(c = fgetc(f)));
   if (c != EOF) fseek(f, -1, SEEK_CUR);
   return 1;
 }
 
 static int read_hex_post(FILE *f, tok *t) {
   t->data.num = 0;
-  long mark = ftell(f);
   char c = fgetc(f);
   if (!is_hex_digit(c)) return 0;
   do {
@@ -176,18 +176,201 @@ static int read_hex_post(FILE *f, tok *t) {
   return c == 'h';
 }
 
+static int read_oct_c(FILE *f, tok *t);
+static int read_oct_post(FILE *f, tok *t);
+
+#define NUM_OCT_READERS 2
 static int read_oct(FILE *f, tok *t) {
+  static tok_reader readers[NUM_OCT_READERS] = {
+    read_oct_c, read_oct_post
+  };
+  long mark = ftell(f);
+  int i;
+  for (i = 0; i < NUM_OCT_READERS; i++) {
+    if (readers[i](f, t)) return 1;
+    else fseek(f, mark, SEEK_SET);
+  }
   return 0;
 }
 
+static int is_octal_digit(char c) {
+  return (c >= '0' && c <= '7');
+}
+
+static int read_oct_c(FILE *f, tok *t) {
+  t->data.num = 0;
+  char c;
+  c = fgetc(f);
+  if (c != '0') return 0;
+  if (!is_octal_digit(c = fgetc(f))) return 0;
+  do {
+    t->data.num *= 010;
+    t->data.num += c - '0';
+  } while (is_octal_digit(c = fgetc(f)));
+  if (c != EOF) fseek(f, -1, SEEK_CUR);
+  return 1;
+}
+
+static int read_oct_post(FILE *f, tok *t) {
+  t->data.num = 0;
+  char c = fgetc(f);
+  if (!is_octal_digit(c)) return 0;
+  do {
+    t->data.num *= 010;
+    t->data.num += c - '0';
+  } while (is_octal_digit(c = fgetc(f)));
+  return c == 'o';
+}
+
+static int read_bin_c(FILE *f, tok *t);
+static int read_bin_asm(FILE *f, tok *t);
+static int read_bin_post(FILE *f, tok *t);
+
+#define NUM_BIN_READERS 3
 static int read_bin(FILE *f, tok *t) {
+  static tok_reader readers[NUM_BIN_READERS] = {
+    read_bin_c, read_bin_asm, read_bin_post
+  };
+  long mark = ftell(f);
+  int i;
+  for (i = 0; i < NUM_BIN_READERS; i++) {
+    if (readers[i](f, t)) return 1;
+    else fseek(f, mark, SEEK_SET);
+  }
   return 0;
+}
+
+static int is_binary_digit(char c) {
+  return c == '0' || c == '1';
+}
+
+static int read_bin_c(FILE *f, tok *t) {
+  t->data.num = 0;
+  char c;
+  c = fgetc(f);
+  if (c != '0') return 0;
+  c = fgetc(f);
+  if (c != 'b') return 0;
+  while (is_binary_digit(c = fgetc(f))) {
+    t->data.num *= 2;
+    t->data.num += c - '0';
+  }
+  if (c != EOF) fseek(f, -1, SEEK_CUR);
+  return 1;
+}
+
+static int read_bin_asm(FILE *f, tok *t) {
+  t->data.num = 0;
+  char c;
+  c = fgetc(f);
+  if (c != '%') return 0;
+  if (!is_binary_digit(c = fgetc(f))) return 0;
+  do {
+    t->data.num *= 2;
+    t->data.num += c - '0';
+  } while (is_binary_digit(c = fgetc(f)));
+  if (c != EOF) fseek(f, -1, SEEK_CUR);
+  return 1;
+}
+
+static int read_bin_post(FILE *f, tok *t) {
+  t->data.num = 0;
+  char c = fgetc(f);
+  if (!is_binary_digit(c)) return 0;
+  do {
+    t->data.num *= 2;
+    t->data.num += c - '0';
+  } while (is_binary_digit(c = fgetc(f)));
+  return c == 'b';
 }
 
 static int read_char(FILE *f, tok *t) {
-  return 0;
+  t->data.num = 0;
+  char c = fgetc(f);
+  if (c != '\'') return 0;
+  c = fgetc(f);
+  if (c != '\\') {
+    t->data.num = c;
+  } else {
+    switch (c = fgetc(f)) {
+      case '\'': case '\\':
+        t->data.num = c;
+        break;
+      case 'a':
+        t->data.num = '\a';
+        break;
+      case 'b':
+        t->data.num = '\b';
+        break;
+      case 'f':
+        t->data.num = '\f';
+        break;
+      case 'n':
+        t->data.num = '\n';
+        break;
+      case 'r':
+        t->data.num = '\r';
+        break;
+      case 't':
+        t->data.num = '\t';
+        break;
+      case 'v':
+        t->data.num = '\t';
+        break;
+      case '0': case '1': case '2': case '3':
+      case '4': case '5': case '6': case '7':
+        do {
+          t->data.num *= 010;
+          t->data.num += c - '0';
+        } while (is_octal_digit(c = fgetc(f)));
+        fseek(f, -1, SEEK_CUR);
+        break;
+      case 'x':
+        while (is_hex_digit(c = fgetc(f))) {
+          t->data.num *= 0x10;
+          if      (c >= '0' && c <= '9') t->data.num += c - '0';
+          else if (c >= 'A' && c <= 'F') t->data.num += c - 'A' + 0xA;
+          else                           t->data.num += c - 'a' + 0xa;
+        }
+        fseek(f, -1, SEEK_CUR);
+        break;
+      default:
+        return 0;
+    }
+  }
+  return fgetc(f) == '\'';
 }
 
 static int read_bool(FILE *f, tok *t) {
-  return 0;
+  int res = tokread_sym(f, t);
+  t->type = TOK_NUM;
+  if (!res) return 0;
+  if (strcmp(t->data.sym, "true") == 0) {
+    tok_free(*t);
+    t->data.num = 1;
+    return 1;
+  } else if (strcmp(t->data.sym, "false") == 0) {
+    tok_free(*t);
+    t->data.num = 0;
+    return 1;
+  } else {
+    tok_free(*t);
+    return 0;
+  }
+}
+
+void tok_free(tok t) {
+  switch (t.type) {
+    case TOK_SYM:
+      free(t.data.sym);
+      break;
+    case TOK_LBL:
+      free(t.data.lbl);
+      break;
+    case TOK_STR:
+      free(t.data.str);
+      break;
+    default:
+      break;
+  }
 }
